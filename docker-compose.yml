@@ -1,0 +1,137 @@
+services:
+
+  mysql:
+    container_name: openmetadata_mysql
+    image: mysql:8.0.33
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: openmetadata_db
+      MYSQL_USER: openmetadata_user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3306:3306"
+    volumes:
+      - openmetadata_mysql_data:/var/lib/mysql
+    
+  postgres_ecommerce:
+    image: postgres:16
+    container_name: postgres_ecommerce_lab
+    restart: always
+    environment:
+      POSTGRES_USER: ecommerce_user
+      POSTGRES_PASSWORD: ecommerce_password
+      POSTGRES_DB: ecommerce
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_ecommerce_data:/var/lib/postgresql/data
+
+  elasticsearch:
+    container_name: openmetadata_elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.4
+    restart: always
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - openmetadata_es_data:/usr/share/elasticsearch/data
+
+  execute_migrate_all:
+    container_name: execute_migrate_all
+    image: docker.getcollate.io/openmetadata/server:1.6.2
+    command: "./bootstrap/openmetadata-ops.sh migrate"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: openmetadata_user
+      DB_USER_PASSWORD: password
+      OM_DATABASE: openmetadata_db
+      DB_SCHEME: mysql
+
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      ELASTICSEARCH_SCHEME: http
+
+    depends_on:
+      - mysql
+      - elasticsearch
+
+  ingestion:
+    container_name: openmetadata_ingestion
+    image: docker.getcollate.io/openmetadata/ingestion:1.6.2
+    restart: always
+
+    depends_on:
+      - openmetadata_server
+
+    command: standalone
+
+    environment:
+      AIRFLOW_HOME: /opt/airflow
+
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
+      AIRFLOW__WEBSERVER__SECRET_KEY: openmetadata_secret_key
+      AIRFLOW__WEBSERVER__RBAC: "True"
+
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+      _AIRFLOW_WWW_USER_FIRSTNAME: admin
+      _AIRFLOW_WWW_USER_LASTNAME: admin
+      _AIRFLOW_WWW_USER_EMAIL: admin@example.com
+      _AIRFLOW_WWW_USER_ROLE: Admin
+
+      AIRFLOW_USERNAME: admin
+      AIRFLOW_PASSWORD: admin
+
+      AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS: /opt/airflow/dag_generated_configs
+
+      OPENMETADATA_SERVER_URL: http://openmetadata_server:8585/api
+
+    ports:
+      - "8080:8080"
+
+    volumes:
+      - ingestion_airflow_data:/opt/airflow
+
+  openmetadata_server:
+    container_name: openmetadata_server
+    image: docker.getcollate.io/openmetadata/server:1.6.2
+    restart: always
+    environment:
+
+      SERVER_PORT: 8585
+
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: openmetadata_user
+      DB_USER_PASSWORD: password
+      OM_DATABASE: openmetadata_db
+      DB_SCHEME: mysql
+
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      ELASTICSEARCH_SCHEME: http
+
+      PIPELINE_SERVICE_CLIENT_ENDPOINT: http://ingestion:8080
+      SERVER_HOST_API_URL: http://openmetadata_server:8585/api
+      AIRFLOW_USERNAME: admin
+      AIRFLOW_PASSWORD: admin
+
+    ports:
+      - "8585:8585"
+
+    depends_on:
+      execute_migrate_all:
+        condition: service_completed_successfully
+
+volumes:
+  openmetadata_mysql_data:
+  openmetadata_es_data:
+  postgres_ecommerce_data:
+  ingestion_airflow_data:
